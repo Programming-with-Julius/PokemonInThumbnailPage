@@ -23,6 +23,20 @@ body {
   font: 15px/1.4 system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji";
 }
 
+.hint {
+  margin-left: auto;        /* pushes it to the right */
+  opacity: .85;
+  font-size: 12px;
+  white-space: nowrap;
+}
+@media (max-width: 540px) {
+  .hint {
+    white-space: normal;    /* allow wrapping on tiny screens */
+    font-size: 11px;
+  }
+}
+
+
 /* Bars */
 .bar {
   position: fixed;

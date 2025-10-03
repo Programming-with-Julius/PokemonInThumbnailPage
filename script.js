@@ -17,6 +17,9 @@
   const zoomButtons = Array.from(document.querySelectorAll('.zoom-btn'));
   const cmdOutput = document.getElementById('cmdOutput');
   const copyBtn = document.getElementById('copyBtn');
+  
+  const helpHint = document.getElementById('helpHint');
+
 
   // --- State ---
   let imgW = 0, imgH = 0;
@@ -69,6 +72,21 @@
     panY = rect.y + (rect.h - drawnH) / 2;
     applyTransform();
   }
+  
+  function updateHelpHint() {
+  const isTouch =
+    (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) ||
+    (navigator.maxTouchPoints && navigator.maxTouchPoints > 0);
+
+  if (isTouch) {
+    // Mobile / tablet
+    helpHint.textContent = '1 finger: draw path • 2 fingers: pan & pinch-zoom • Zoom: Fit / 100% / 500% →';
+  } else {
+    // Desktop / laptop
+    helpHint.textContent = 'Ctrl+drag: draw path • Drag: pan • Zoom: Fit / 100% / 500% →';
+  }
+}
+
 
   function setZoomButtonActive(which) {
     zoomButtons.forEach(btn => {
@@ -364,6 +382,8 @@
       panY = midScreen.y - scale * midWorld.y;
       applyTransform();
     }
+	updateHelpHint();
+
   });
 
   // --- Init once image is ready ---
@@ -389,6 +409,8 @@
 
     // Prevent context menu on long-press/right-click (helps mobile drawing)
     viewport.addEventListener('contextmenu', (e) => e.preventDefault());
+	updateHelpHint();
+
   }
 
   if (mapImg.complete) {
