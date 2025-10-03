@@ -1,13 +1,349 @@
 <!doctype html>
-<html>
-  <head><meta charset="utf-8"><title>Hello</title></head>
-  <body>
-    <h1>Hello from GitHub Pages</h1>
-    <script>
-      // Yes, JS runs fine here
-      console.log("It works!");
-      // Example: fetch external API
-      // fetch("https://api.example.com/data").then(r => r.json()).then(console.log);
-    </script>
-  </body>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Kanto (Gen 1) — Zoomable Map</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <style>
+    :root {
+      --bg: #0b0b0b;
+      --fg: #f3f3f3;
+      --bar-bg: rgba(20, 20, 20, 0.85);
+      --bar-border: rgba(255, 255, 255, 0.15);
+    }
+    html, body {
+      margin: 0;
+      height: 100%;
+      overflow: hidden; /* avoid page scrollbars; we pan within the viewport */
+      background: var(--bg);
+      color: var(--fg);
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+    }
+    /* Viewport container */
+    #viewport {
+      position: fixed;
+      inset: 0;
+      touch-action: none; /* we implement our own pinch/drag */
+      cursor: grab;
+      background: var(--bg);
+    }
+    #viewport.dragging { cursor: grabbing; }
+
+    /* The giant image sits in a transform wrapper */
+    #content {
+      position: absolute;
+      transform-origin: 0 0; /* top-left origin for predictable math */
+      will-change: transform;
+    }
+
+    /* Keep pixels sharp when scaled up */
+    #map {
+      display: block;
+      max-width: none;
+      image-rendering: pixelated;      /* most browsers */
+      image-rendering: crisp-edges;    /* fallback */
+      -ms-interpolation-mode: nearest-neighbor; /* old IE (harmless elsewhere) */
+    }
+
+    /* Floating credit bar */
+    #credit {
+      position: fixed;
+      left: 50%;
+      bottom: env(safe-area-inset-bottom, 0);
+      transform: translateX(-50%);
+      background: var(--bar-bg);
+      color: var(--fg);
+      border: 1px solid var(--bar-border);
+      border-radius: 10px;
+      padding: 10px 14px;
+      margin: 12px;
+      font-size: 14px;
+      line-height: 1.35;
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      z-index: 10;
+      white-space: nowrap;
+      max-width: calc(100vw - 24px);
+      overflow: auto;
+    }
+    #credit a {
+      color: #9bdcff;
+      text-decoration: none;
+      border-bottom: 1px dashed rgba(155, 220, 255, 0.6);
+    }
+    #credit a:hover { border-bottom-style: solid; }
+
+    /* Small helper buttons (optional) */
+    .btn {
+      font: inherit;
+      color: var(--fg);
+      background: transparent;
+      border: 1px solid var(--bar-border);
+      border-radius: 8px;
+      padding: 6px 10px;
+      cursor: pointer;
+    }
+    .btn:hover { background: rgba(255,255,255,0.06); }
+  </style>
+</head>
+<body>
+  <div id="viewport" aria-label="Zoomable Kanto map viewport">
+    <div id="content">
+      <img
+        id="map"
+        alt="Kanto (Gen 1) full map"
+        src="https://blog.vjeux.com/wp-content/uploads/2023/12/pokemon_blue-1.png"
+        referrerpolicy="no-referrer"
+      />
+    </div>
+  </div>
+
+  <div id="credit" role="contentinfo" aria-label="Credits and links">
+    <span>🗺️ Kanto (Gen 1) map</span>
+    <button class="btn" id="resetBtn" title="Reset view">Reset</button>
+    <span>• Credits:
+      <a href="https://blog.vjeux.com/2023/project/pokemon-red-blue-map.html" target="_blank" rel="noopener noreferrer">vjeux’ blog post</a>
+      &amp;
+      <a href="https://www.youtube.com/watch?v=bryeT4MtzDg" target="_blank" rel="noopener noreferrer">related YouTube video</a>
+    </span>
+  </div>
+
+  <script>
+    // Basic pan & zoom with nearest-neighbor scaling.
+    // Works on desktop (wheel + drag), mobile (pinch + drag), and keyboard (+/-/0).
+    (function () {
+      const viewport = document.getElementById('viewport');
+      const content  = document.getElementById('content');
+      const img      = document.getElementById('map');
+      const resetBtn = document.getElementById('resetBtn');
+
+      // Current transform state
+      let scale = 1;
+      let translateX = 0;
+      let translateY = 0;
+
+      // Limits
+      const MIN_SCALE = 0.1;
+      const MAX_SCALE = 32;
+
+      // Animation batching
+      let rafId = null;
+      function applyTransform() {
+        rafId = null;
+        content.style.transform = `translate(${translateX}px, ${translateY}px) scale(${scale})`;
+      }
+      function scheduleTransform() {
+        if (rafId == null) rafId = requestAnimationFrame(applyTransform);
+      }
+
+      // Fit-to-screen on load
+      function fitToScreen() {
+        const vw = viewport.clientWidth;
+        const vh = viewport.clientHeight;
+        const iw = img.naturalWidth;
+        const ih = img.naturalHeight;
+
+        if (!iw || !ih) return;
+
+        // Fit entirely within viewport
+        const fit = Math.min(vw / iw, vh / ih);
+        scale = fit;
+
+        // Center it
+        translateX = (vw - iw * scale) / 2;
+        translateY = (vh - ih * scale) / 2;
+
+        scheduleTransform();
+      }
+
+      // Keep at least covering the viewport when zoomed in; allow empty space when zoomed out.
+      function clampTranslation() {
+        const vw = viewport.clientWidth;
+        const vh = viewport.clientHeight;
+        const iw = img.naturalWidth * scale;
+        const ih = img.naturalHeight * scale;
+
+        // When the image is larger than viewport, prevent dragging past edges
+        if (iw >= vw) {
+          const minX = vw - iw;
+          const maxX = 0;
+          if (translateX < minX) translateX = minX;
+          if (translateX > maxX) translateX = maxX;
+        }
+        if (ih >= vh) {
+          const minY = vh - ih;
+          const maxY = 0;
+          if (translateY < minY) translateY = minY;
+          if (translateY > maxY) translateY = maxY;
+        }
+      }
+
+      function zoomAt(pointX, pointY, deltaScale) {
+        const oldScale = scale;
+        scale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, scale * deltaScale));
+        const factor = scale / oldScale;
+
+        // Zoom towards the cursor/focus point (keep that point stationary in screen space)
+        translateX = pointX - (pointX - translateX) * factor;
+        translateY = pointY - (pointY - translateY) * factor;
+
+        clampTranslation();
+        scheduleTransform();
+      }
+
+      // Pointer-based dragging & pinch zoom (using Pointer Events)
+      const active = new Map(); // pointerId -> {x, y}
+      let isDragging = false;
+
+      function getMidpoint() {
+        const pts = [...active.values()];
+        if (pts.length === 0) return null;
+        if (pts.length === 1) return pts[0];
+        const x = (pts[0].x + pts[1].x) / 2;
+        const y = (pts[0].y + pts[1].y) / 2;
+        return { x, y };
+      }
+      function getDistance() {
+        const pts = [...active.values()];
+        if (pts.length < 2) return 0;
+        const dx = pts[1].x - pts[0].x;
+        const dy = pts[1].y - pts[0].y;
+        return Math.hypot(dx, dy);
+      }
+
+      let prevMid = null;
+      let prevDist = 0;
+
+      viewport.addEventListener('pointerdown', (e) => {
+        viewport.setPointerCapture(e.pointerId);
+        active.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        if (active.size === 1) {
+          isDragging = true;
+          viewport.classList.add('dragging');
+          prevMid = getMidpoint();
+        } else if (active.size === 2) {
+          prevMid = getMidpoint();
+          prevDist = getDistance();
+        }
+      });
+
+      viewport.addEventListener('pointermove', (e) => {
+        if (!active.has(e.pointerId)) return;
+        active.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+        if (active.size === 1 && isDragging) {
+          const now = getMidpoint();
+          if (prevMid) {
+            translateX += now.x - prevMid.x;
+            translateY += now.y - prevMid.y;
+            clampTranslation();
+            scheduleTransform();
+          }
+          prevMid = now;
+        } else if (active.size === 2) {
+          const nowMid = getMidpoint();
+          const nowDist = getDistance();
+          if (prevMid && prevDist) {
+            // Pan by midpoint delta
+            translateX += nowMid.x - prevMid.x;
+            translateY += nowMid.y - prevMid.y;
+
+            // Pinch zoom around midpoint
+            const ds = nowDist / prevDist;
+            const oldScale = scale;
+            scale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, scale * ds));
+            const factor = scale / oldScale;
+
+            translateX = nowMid.x - (nowMid.x - translateX) * factor;
+            translateY = nowMid.y - (nowMid.y - translateY) * factor;
+            clampTranslation();
+            scheduleTransform();
+          }
+          prevMid = nowMid;
+          prevDist = nowDist;
+        }
+      });
+
+      function endPointer(e) {
+        if (active.has(e.pointerId)) active.delete(e.pointerId);
+        if (active.size <= 1) {
+          prevDist = 0;
+        }
+        if (active.size === 0) {
+          isDragging = false;
+          viewport.classList.remove('dragging');
+          prevMid = null;
+        } else {
+          prevMid = getMidpoint();
+        }
+      }
+      viewport.addEventListener('pointerup', endPointer);
+      viewport.addEventListener('pointercancel', endPointer);
+      viewport.addEventListener('pointerleave', endPointer);
+
+      // Wheel zoom (Ctrl/Cmd+wheel for precise? We'll just always zoom on wheel)
+      viewport.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        const zoomIntensity = 1.0015; // small per-wheel-step multiplier
+        const delta = e.deltaY < 0 ? (1 / (1 - e.deltaY * 0.01)) : (1 - e.deltaY * 0.01);
+        // Bound the change to avoid huge jumps on some devices
+        const bounded = Math.pow(zoomIntensity, -e.deltaY);
+        const rect = viewport.getBoundingClientRect();
+        const pointX = e.clientX - rect.left;
+        const pointY = e.clientY - rect.top;
+        zoomAt(pointX, pointY, bounded);
+      }, { passive: false });
+
+      // Double-click / double-tap to zoom in, Shift+double to zoom out
+      viewport.addEventListener('dblclick', (e) => {
+        const rect = viewport.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        zoomAt(x, y, e.shiftKey ? 0.5 : 2);
+      });
+
+      // Keyboard shortcuts: + / - / 0
+      window.addEventListener('keydown', (e) => {
+        if (e.key === '+' || e.key === '=') {
+          const rect = viewport.getBoundingClientRect();
+          zoomAt(rect.width / 2, rect.height / 2, 1.2);
+        } else if (e.key === '-' || e.key === '_') {
+          const rect = viewport.getBoundingClientRect();
+          zoomAt(rect.width / 2, rect.height / 2, 1/1.2);
+        } else if (e.key === '0') {
+          fitToScreen();
+        }
+      });
+
+      // Reset button
+      resetBtn.addEventListener('click', fitToScreen);
+
+      // Refit on resize (tries to preserve center if already zoomed)
+      window.addEventListener('resize', () => {
+        // If we're at initial fit scale (roughly), refit. Otherwise keep user zoom.
+        const vw = viewport.clientWidth, vh = viewport.clientHeight;
+        const iw = img.naturalWidth, ih = img.naturalHeight;
+        if (iw && ih) {
+          const fit = Math.min(vw / iw, vh / ih);
+          const near = Math.abs(scale - fit) < 0.0001;
+          if (near) fitToScreen();
+          else scheduleTransform();
+        }
+      });
+
+      // Initialize after the image is ready
+      if (img.complete && img.naturalWidth) {
+        fitToScreen();
+      } else {
+        img.addEventListener('load', fitToScreen, { once: true });
+        img.addEventListener('error', () => {
+          alert('Failed to load the map image.');
+        }, { once: true });
+      }
+    })();
+  </script>
+</body>
 </html>
