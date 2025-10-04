@@ -394,6 +394,24 @@
     }
   }
 
+  function onScrollWheel(e) {
+    e.preventDefault();
+    const zoomIntensity = 0.1; // how fast zoom reacts
+    const mouse = { x: e.clientX, y: e.clientY };
+    const worldPos = screenToWorld(mouse.x, mouse.y);
+
+    // scroll up = zoom in, scroll down = zoom out
+    const delta = e.deltaY < 0 ? 1 + zoomIntensity : 1 - zoomIntensity;
+
+    const newScale = clamp(scale * delta, ZOOM_MIN, ZOOM_MAX);
+    scale = newScale;
+    panX = mouse.x - scale * worldPos.x;
+    panY = mouse.y - scale * worldPos.y;
+    zoomMode = 'abs';
+    setZoomButtonActive(null);
+    applyTransform();
+  }
+
   function dist(a, b) {
     const dx = a.x - b.x, dy = a.y - b.y;
     return Math.hypot(dx, dy);
@@ -479,6 +497,9 @@
 
     // Prevent context menu on long-press/right-click (helps mobile drawing)
     viewport.addEventListener('contextmenu', (e) => e.preventDefault());
+
+    // Scroll to zoom
+    viewport.addEventListener('wheel', onScrollWheel, { passive: false });
 
     updateHelpHint();
   }
