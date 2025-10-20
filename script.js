@@ -1,140 +1,101 @@
 (() => {
-  // --- Config ---
-  const TILE_SIZE = 16; // source image tile width/height in pixels
-  const ZOOM_MIN = 0.1;
-  const ZOOM_MAX = 8;
+  // ----- Constants -----
+  // Real image is 7200x7200 (1x). We tiled a 2x upscale -> 14400x14400.
+  const IMG_W1 = 7200, IMG_H1 = 7200;
+  const UPSCALE = 2;
+  const IMG_W2 = IMG_W1 * UPSCALE, IMG_H2 = IMG_H1 * UPSCALE;
 
-  // --- DOM ---
-  const viewport = document.getElementById('viewport');
-  const stage = document.getElementById('stage');
-  const mapImg = document.getElementById('map');
-  const markers = document.getElementById('markers');
+  // Real in-game tile = 16px at 1x => 32px at our 2x tiles
+  const TILE_1X = 16;
+  const TILE_2X = TILE_1X * UPSCALE; // 32
 
-  const topBar = document.getElementById('topBar');
-  const rightBar = document.getElementById('rightBar');
-  const bottomBar = document.getElementById('bottomBar');
+  const MAX_ZOOM = 5; // we built tiles for z=0..5
+  const TILE_URL = './kanto_tiles_512/{z}/{x}/{y}.png'; // adjust if hosted elsewhere
 
-  const zoomButtons = Array.from(document.querySelectorAll('.zoom-btn'));
+  // UI refs
+  const helpHint = document.getElementById('helpHint');
   const cmdOutput = document.getElementById('cmdOutput');
   const copyBtn = document.getElementById('copyBtn');
-  const helpHint = document.getElementById('helpHint'); // may be null if not added
+  const zoomButtons = Array.from(document.querySelectorAll('.zoom-btn'));
+  const overlay = document.getElementById('overlay');
 
-  // --- State ---
-  let imgW = 0, imgH = 0;
-  let scale = 1;          // world->screen scale
-  let panX = 0, panY = 0; // screen translation (in CSS pixels)
-  let fitScale = 1;
-  let zoomMode = 'fit';   // 'fit' or 'abs'
+  // ----- Leaflet map -----
+  const map = L.map('map', {
+    crs: L.CRS.Simple,
+    minZoom: 0,
+    maxZoom: MAX_ZOOM,
+    zoomSnap: 1,
+    zoomDelta: 1,
+    wheelPxPerZoomLevel: 120,
+    inertia: true,
+    zoomControl: false
+  });
 
-  // Interaction state
-  const pointers = new Map(); // pointerId -> {x,y,type}
-  let isPanning = false;
-  let panLastX = 0, panLastY = 0;
+  // define image bounds in pixels (2x space) -> latlng
+  const southWest = map.unproject([0, IMG_H2], MAX_ZOOM);
+  const northEast = map.unproject([IMG_W2, 0], MAX_ZOOM);
+  const bounds = L.latLngBounds(southWest, northEast);
+  map.setMaxBounds(bounds);
+  map.fitBounds(bounds);
 
-  let isPinching = false;
-  let pinchStartDist = 0;
-  let pinchStartScale = 1;
-  let pinchMidWorld = { x: 0, y: 0 };
+  // tiles
+  L.tileLayer(TILE_URL, {
+    tileSize: 512,
+    noWrap: true,
+    minZoom: 0, maxZoom: MAX_ZOOM,
+    bounds
+  }).addTo(map);
 
-  let isPathDrawing = false;
-  let pathTiles = [];            // [{x,y}]
-  let pathDirections = [];       // ["right", "up", ...]
+  // overlay sizing follows map container
+  const resizeOverlay = () => {
+    const r = map.getContainer().getBoundingClientRect();
+    overlay.setAttribute('width', r.width);
+    overlay.setAttribute('height', r.height);
+  };
+  resizeOverlay();
+  map.on('resize zoom move', () => requestAnimationFrame(resizeOverlay));
+
+  // ----- Path state -----
+  let pathTiles = [];      // [{x,y}] in 1x tile coordinates (16px grid)
+  let pathDirections = []; // ["right","up",...]
   let lastTile = null;
 
-  // Touch draw gating
-  let drawingPointerId = null;         // which finger is drawing
-  let drawCandidate = null;            // {id, x, y, timer}
-  const DRAW_DELAY_MS = 120;           // wait before starting draw (lets 2nd finger join)
-  const DRAW_MOVE_THRESHOLD = 8;       // px movement that can also trigger start
+  // Interaction state (Pointer Events)
+  const pointers = new Map(); // id -> {type}
+  let drawingPointerId = null;
+  let isPathDrawing = false;
+  let drawCandidate = null;
+  const DRAW_DELAY_MS = 120;
+  const DRAW_MOVE_THRESHOLD = 8; // px
 
-  // --- Helpers ---
-  function applyTransform() {
-    stage.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`;
-  }
-
-  function contentRect() {
-    // Area not covered by fixed bars (so "fit" feels right)
-    const t = topBar.getBoundingClientRect().height;
-    const r = rightBar.getBoundingClientRect().width + 8; // + margin
-    const b = bottomBar.getBoundingClientRect().height;
-    return {
-      x: 0,
-      y: t,
-      w: window.innerWidth - r,
-      h: window.innerHeight - t - b
-    };
-  }
-
-  function computeFitAndCenter() {
-    const rect = contentRect();
-    fitScale = Math.min(rect.w / imgW, rect.h / imgH);
-    // center image within rect
-    scale = fitScale;
-    const drawnW = imgW * scale;
-    const drawnH = imgH * scale;
-    panX = rect.x + (rect.w - drawnW) / 2;
-    panY = rect.y + (rect.h - drawnH) / 2;
-    applyTransform();
-  }
+  // ----- Helpers -----
+  const setHint = () => {
+    const isTouch =
+      (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) ||
+      (navigator.maxTouchPoints && navigator.maxTouchPoints > 0);
+    helpHint.textContent = isTouch
+      ? '1 finger: draw path • 2 fingers: pan & pinch-zoom • Zoom: Fit / Z2 / Z4 / Z5 →'
+      : 'Ctrl+drag: draw path • Drag: pan • Zoom: Fit / Z2 / Z4 / Z5 →';
+  };
+  setHint();
+  window.addEventListener('resize', setHint);
 
   function setZoomButtonActive(which) {
-    zoomButtons.forEach(btn => {
-      const m = btn.dataset.zoom;
-      btn.classList.toggle('active', (which === m));
-    });
+    zoomButtons.forEach(btn => btn.classList.toggle('active', btn.dataset.zoom === which));
   }
 
   function setZoom(mode) {
-    // mode: 'fit' | '1' | '5' (string)
-    const rect = contentRect();
-    const midScreen = { x: rect.x + rect.w / 2, y: rect.y + rect.h / 2 };
-    const midWorld = screenToWorld(midScreen.x, midScreen.y);
-
     if (mode === 'fit') {
-      zoomMode = 'fit';
-      computeFitAndCenter();
+      map.fitBounds(bounds);
+      setZoomButtonActive('fit');
     } else {
-      zoomMode = 'abs';
-      let targetScale = Number(mode);
-      targetScale = clamp(targetScale, ZOOM_MIN, ZOOM_MAX);
-      // keep midWorld anchored to rect center
-      scale = targetScale;
-      panX = midScreen.x - scale * midWorld.x;
-      panY = midScreen.y - scale * midWorld.y;
-      applyTransform();
+      const z = Number(mode);
+      map.setZoom(z);
+      setZoomButtonActive(mode);
     }
-    setZoomButtonActive(mode);
   }
-
-  function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
-
-  function screenToWorld(sx, sy) {
-    return { x: (sx - panX) / scale, y: (sy - panY) / scale };
-  }
-
-  function worldToTile(wx, wy) {
-    return { x: Math.floor(wx / TILE_SIZE), y: Math.floor(wy / TILE_SIZE) };
-  }
-
-  function withinImage(wx, wy) {
-    return wx >= 0 && wy >= 0 && wx <= imgW && wy <= imgH;
-  }
-
-  function clearPath() {
-    markers.innerHTML = '';
-    pathTiles = [];
-    pathDirections = [];
-    lastTile = null;
-    cmdOutput.value = '';
-  }
-
-  function addMarker(tile, isFirst=false) {
-    const d = document.createElement('div');
-    d.className = 'tile' + (isFirst ? ' first' : '');
-    d.style.left = `${tile.x * TILE_SIZE}px`;
-    d.style.top = `${tile.y * TILE_SIZE}px`;
-    markers.appendChild(d);
-  }
+  zoomButtons.forEach(btn => btn.addEventListener('click', () => setZoom(btn.dataset.zoom)));
+  setZoomButtonActive('fit');
 
   function dirFromStep(dx, dy) {
     if (dx === 1 && dy === 0) return 'right';
@@ -143,6 +104,75 @@
     if (dx === 0 && dy === -1) return 'up';
     return null;
   }
+
+  function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+
+  // Convert DOM mouse/touch event to 2x pixel point inside the image
+  function eventToWorld2x(e) {
+    // Leaflet supplies e.latlng for map container events; if missing, compute from screen point
+    let latlng = e.latlng;
+    if (!latlng && e.clientX != null) {
+      latlng = map.mouseEventToLatLng(e);
+    }
+    const p2 = map.project(latlng, MAX_ZOOM); // point in 2x pixels at max zoom
+    return { x: p2.x, y: p2.y };
+  }
+
+  function world2xToTile1x(wx2, wy2) {
+    // convert 2x pixel coords to 1x tile indices
+    const x = Math.floor((wx2 / UPSCALE) / TILE_1X); // == Math.floor(wx2 / TILE_2X)
+    const y = Math.floor((wy2 / UPSCALE) / TILE_1X);
+    return { x, y };
+  }
+
+  function tile1xToBoundsLatLng(t) {
+    // return Leaflet LatLngBounds for drawing rectangle covering this tile (in 2x pixels)
+    const left2 = t.x * TILE_2X;
+    const top2  = t.y * TILE_2X;
+    const right2 = left2 + TILE_2X;
+    const bottom2 = top2 + TILE_2X;
+    const nw = map.unproject([left2, top2], MAX_ZOOM);
+    const se = map.unproject([right2, bottom2], MAX_ZOOM);
+    return L.latLngBounds(nw, se);
+  }
+
+  function withinImage2x(wx2, wy2) {
+    return wx2 >= 0 && wy2 >= 0 && wx2 <= IMG_W2 && wy2 <= IMG_H2;
+  }
+
+  // ----- Drawing (SVG overlay) -----
+  function clearPath() {
+    pathTiles = [];
+    pathDirections = [];
+    lastTile = null;
+    cmdOutput.value = '';
+    overlay.innerHTML = '';
+  }
+
+  function addRectForTile(t, isFirst = false) {
+    // compute rectangle in screen space each time (so it follows pan/zoom)
+    // We'll store a tag with tile coords; on move/zoom we'll re-render all (lightweight).
+    const g = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    const b = tile1xToBoundsLatLng(t);
+    // Convert LatLngBounds corners to container pixels
+    const p1 = map.latLngToContainerPoint(b.getNorthWest());
+    const p2 = map.latLngToContainerPoint(b.getSouthEast());
+    g.setAttribute('x', String(p1.x));
+    g.setAttribute('y', String(p1.y));
+    g.setAttribute('width', String(p2.x - p1.x));
+    g.setAttribute('height', String(p2.y - p1.y));
+    g.setAttribute('class', 'tile' + (isFirst ? ' first' : ''));
+    overlay.appendChild(g);
+  }
+
+  function rerenderOverlay() {
+    overlay.innerHTML = '';
+    for (let i = 0; i < pathTiles.length; i++) {
+      addRectForTile(pathTiles[i], i === 0);
+    }
+  }
+
+  map.on('zoom move', () => requestAnimationFrame(rerenderOverlay));
 
   function extendPathTo(targetTile) {
     if (!lastTile) return;
@@ -158,7 +188,6 @@
       } else {
         stepY = Math.sign(remY);
       }
-
       cx += stepX;
       cy += stepY;
 
@@ -167,77 +196,46 @@
         pathDirections.push(stepDir);
         const newTile = { x: cx, y: cy };
         pathTiles.push(newTile);
-        addMarker(newTile, false);
       }
     }
     lastTile = { x: cx, y: cy };
     cmdOutput.value = pathDirections.join(' ');
+    rerenderOverlay();
   }
 
-  function startPathAtScreen(sx, sy) {
-    const w = screenToWorld(sx, sy);
-    if (!withinImage(w.x, w.y)) return;
+  function startPathAtEvent(e) {
+    const w = eventToWorld2x(e);
+    if (!withinImage2x(w.x, w.y)) return;
 
     clearPath();
 
-    const t = worldToTile(w.x, w.y);
+    const t = world2xToTile1x(w.x, w.y);
     lastTile = { ...t };
     pathTiles.push(lastTile);
-    addMarker(lastTile, true);
+    rerenderOverlay();
     isPathDrawing = true;
   }
 
-  function movePathAtScreen(sx, sy, opts = {}) {
+  function movePathAtEvent(e) {
     if (!isPathDrawing) return;
-    const w = screenToWorld(sx, sy);
-    if (!withinImage(w.x, w.y)) return;
-    const t = worldToTile(w.x, w.y);
+    const w = eventToWorld2x(e);
+    if (!withinImage2x(w.x, w.y)) return;
+    const t = world2xToTile1x(w.x, w.y);
 
-    // Only extend when we enter a new tile
     if (!lastTile || t.x !== lastTile.x || t.y !== lastTile.y) {
       extendPathTo(t);
-    }
-
-    // If this is desktop and CTRL was released, finish the path
-    if (opts.pointerType === 'mouse' && opts.ctrlKey === false) {
-      endPath();
     }
   }
 
   function endPath() {
     isPathDrawing = false;
+    drawingPointerId = null;
   }
 
-  // --- Device hint ---
-  function updateHelpHint() {
-    if (!helpHint) return; // skip gracefully if element isn't present
-    const isTouch =
-      (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) ||
-      (navigator.maxTouchPoints && navigator.maxTouchPoints > 0);
-
-    if (isTouch) {
-      helpHint.textContent = '1 finger: draw path • 2 fingers: pan & pinch-zoom • Zoom: Fit / 100% / 500% →';
-    } else {
-      helpHint.textContent = 'Ctrl+drag: draw path • Drag: pan • Zoom: Fit / 100% / 500% →';
-    }
-  }
-
-  // --- Touch draw gating helpers ---
-  function beginTouchDraw(id, x, y) {
-    if (isPathDrawing) return;
-    drawingPointerId = id;
-    startPathAtScreen(x, y);
-  }
-
+  // ----- Touch gating like your original -----
   function cancelTouchCandidate() {
     if (drawCandidate && drawCandidate.timer) clearTimeout(drawCandidate.timer);
     drawCandidate = null;
-  }
-
-  function abortDrawing(clear = true) {
-    isPathDrawing = false;
-    drawingPointerId = null;
-    if (clear) clearPath();
   }
 
   function tryStartCandidateIfMoved(e) {
@@ -246,249 +244,112 @@
     const dy = e.clientY - drawCandidate.y;
     if (Math.hypot(dx, dy) >= DRAW_MOVE_THRESHOLD && pointers.size === 1) {
       cancelTouchCandidate();
-      beginTouchDraw(e.pointerId, e.clientX, e.clientY);
+      drawingPointerId = e.pointerId;
+      startPathAtEvent(e);
+      map.dragging.disable(); // prevent map panning while drawing
     }
   }
 
-  // --- Pointer / gesture handling (Pointer Events) ---
-  function onPointerDown(e) {
-    viewport.setPointerCapture(e.pointerId);
-    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, type: e.pointerType });
+  // ----- Pointer handlers on the map container -----
+  const container = map.getContainer();
+
+  container.addEventListener('pointerdown', (e) => {
+    // Let Leaflet do its thing unless we're starting a draw
+    pointers.set(e.pointerId, { type: e.pointerType });
 
     if (e.pointerType === 'mouse') {
-      if (e.button !== 0) return; // left only
+      if (e.button !== 0) return;
       if (e.ctrlKey) {
-        startPathAtScreen(e.clientX, e.clientY);
-      } else {
-        // start panning
-        isPanning = true;
-        panLastX = e.clientX;
-        panLastY = e.clientY;
+        L.DomEvent.stop(e);
+        startPathAtEvent(e);
+        isPathDrawing = true;
       }
       return;
     }
 
-    // Touch logic (gated)
     if (e.pointerType === 'touch') {
-      e.preventDefault();
-
       if (pointers.size === 2) {
-        // If a second finger arrives during a pending candidate, cancel drawing
+        // pinch intent: cancel any pending draw
         cancelTouchCandidate();
-        if (isPathDrawing) {
-          // Abort unintended draw and clear temporary tiles
-          abortDrawing(true);
-        }
-        // Start pinch
-        isPinching = true;
-        const [a, b] = getTwoPointers();
-        pinchStartDist = dist(a, b);
-        pinchStartScale = scale;
-        const mid = midpoint(a, b);
-        pinchMidWorld = screenToWorld(mid.x, mid.y);
-        zoomMode = 'abs';
-        setZoomButtonActive(null);
+        if (isPathDrawing) { endPath(); }
         return;
       }
-
       if (pointers.size === 1) {
-        // Create a draw candidate; delay actual draw so a second finger can join for pinch
-        const only = [...pointers.entries()][0]; // [id, {x,y,type}]
-        const [pid, p] = only;
-
-        cancelTouchCandidate(); // just in case
+        // start a candidate (delay to allow second finger to join)
+        const id = e.pointerId;
+        cancelTouchCandidate();
         drawCandidate = {
-          id: pid,
-          x: p.x,
-          y: p.y,
+          id,
+          x: e.clientX,
+          y: e.clientY,
           timer: setTimeout(() => {
-            // If still one finger after the delay, start drawing
             if (pointers.size === 1) {
-              beginTouchDraw(pid, p.x, p.y);
+              drawingPointerId = id;
+              startPathAtEvent(e);
+              map.dragging.disable();
             }
             cancelTouchCandidate();
           }, DRAW_DELAY_MS)
         };
       }
     }
-  }
+  }, { passive: false });
 
-  function onPointerMove(e) {
+  container.addEventListener('pointermove', (e) => {
     if (!pointers.has(e.pointerId)) return;
-    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, type: e.pointerType });
-
-    if (e.pointerType === 'touch') e.preventDefault();
-
-    // Pinch zoom (touch)
-    if (isPinching && pointers.size >= 2) {
-      const [a, b] = getTwoPointers();
-      const newDist = dist(a, b);
-      if (pinchStartDist > 0) {
-        const factor = newDist / pinchStartDist;
-        const targetScale = clamp(pinchStartScale * factor, ZOOM_MIN, ZOOM_MAX);
-        const mid = midpoint(a, b);
-        // keep pinchMidWorld anchored to current midpoint
-        scale = targetScale;
-        panX = mid.x - scale * pinchMidWorld.x;
-        panY = mid.y - scale * pinchMidWorld.y;
-        zoomMode = 'abs';
-        setZoomButtonActive(null); // none active
-        applyTransform();
-      }
-      return;
-    }
-
-    // Mouse panning
-    if (isPanning && e.pointerType === 'mouse') {
-      const dx = e.clientX - panLastX;
-      const dy = e.clientY - panLastY;
-      panX += dx;
-      panY += dy;
-      panLastX = e.clientX;
-      panLastY = e.clientY;
-      applyTransform();
-      return;
-    }
-
-    // If we have a single-finger draw candidate, start it on movement if user drags
-    tryStartCandidateIfMoved(e);
-
-    // Path drawing (touch single finger or mouse ctrl-drag)
-    if (isPathDrawing) {
-      // On touch, only the drawing pointer should extend the path
-      if (e.pointerType === 'touch' && e.pointerId !== drawingPointerId) return;
-      movePathAtScreen(e.clientX, e.clientY, { pointerType: e.pointerType, ctrlKey: e.ctrlKey });
-    }
-  }
-
-  function onPointerUp(e) {
-    if (pointers.has(e.pointerId)) {
-      viewport.releasePointerCapture(e.pointerId);
-      pointers.delete(e.pointerId);
-    }
 
     if (e.pointerType === 'mouse') {
-      isPanning = false;
-      if (isPathDrawing) endPath();
+      if (isPathDrawing) {
+        L.DomEvent.stop(e);
+        movePathAtEvent(e);
+      }
       return;
     }
 
     if (e.pointerType === 'touch') {
-      e.preventDefault();
-
-      // If the pointer that went up was our candidate, cancel it
-      if (drawCandidate && e.pointerId === drawCandidate.id) {
-        cancelTouchCandidate();
-      }
-
-      // If the pointer that went up was the drawing finger, end the path
+      // If it's a one-finger candidate, movement may start drawing
+      tryStartCandidateIfMoved(e);
       if (isPathDrawing && e.pointerId === drawingPointerId) {
-        endPath();
-        drawingPointerId = null;
+        movePathAtEvent(e);
       }
+    }
+  }, { passive: false });
 
-      if (pointers.size < 2) {
-        isPinching = false;
-      }
+  function finishPointer(e) {
+    if (pointers.has(e.pointerId)) pointers.delete(e.pointerId);
+
+    if (e.pointerType === 'mouse') {
+      if (isPathDrawing) { endPath(); }
       return;
     }
-  }
 
-  function dist(a, b) {
-    const dx = a.x - b.x, dy = a.y - b.y;
-    return Math.hypot(dx, dy);
-  }
-  function midpoint(a, b) {
-    return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-  }
-  function getTwoPointers() {
-    const arr = [...pointers.values()];
-    return [arr[0], arr[1]];
-  }
-
-  // --- Events: zoom buttons, copy, resize ---
-  zoomButtons.forEach(btn => {
-    btn.addEventListener('click', () => setZoom(btn.dataset.zoom));
-  });
-
-  copyBtn.addEventListener('click', async () => {
-    const txt = cmdOutput.value;
-    try {
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        await navigator.clipboard.writeText(txt);
-      } else {
-        // Fallback
-        const ta = document.createElement('textarea');
-        ta.value = txt;
-        ta.style.position = 'fixed';
-        ta.style.opacity = '0';
-        document.body.appendChild(ta);
-        ta.select();
-        document.execCommand('copy');
-        document.body.removeChild(ta);
+    if (e.pointerType === 'touch') {
+      if (drawCandidate && e.pointerId === drawCandidate.id) cancelTouchCandidate();
+      if (isPathDrawing && e.pointerId === drawingPointerId) {
+        endPath();
+        map.dragging.enable();
       }
-      // visual feedback
+    }
+  }
+  container.addEventListener('pointerup', finishPointer, { passive: false });
+  container.addEventListener('pointercancel', finishPointer, { passive: false });
+  container.addEventListener('lostpointercapture', finishPointer, { passive: false });
+
+  // Prevent native context menus from fighting with drawing UX
+  container.addEventListener('contextmenu', (e) => e.preventDefault());
+
+  // ----- Copy button -----
+  copyBtn.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(cmdOutput.value);
       const i = copyBtn.querySelector('i');
-      i.classList.remove('bi-clipboard');
-      i.classList.add('bi-check2');
-      setTimeout(() => {
-        i.classList.remove('bi-check2');
-        i.classList.add('bi-clipboard');
-      }, 1000);
+      i.classList.remove('bi-clipboard'); i.classList.add('bi-check2');
+      setTimeout(() => { i.classList.remove('bi-check2'); i.classList.add('bi-clipboard'); }, 1000);
     } catch (err) {
-      console.error('Copy failed:', err);
+      // fallback
+      const ta = document.createElement('textarea');
+      ta.value = cmdOutput.value; ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta);
     }
   });
-
-  window.addEventListener('resize', () => {
-    if (zoomMode === 'fit') {
-      computeFitAndCenter();
-      setZoomButtonActive('fit');
-    } else {
-      // keep center point stable when resizing
-      const rect = contentRect();
-      const midScreen = { x: rect.x + rect.w / 2, y: rect.y + rect.h / 2 };
-      const midWorld = screenToWorld(midScreen.x, midScreen.y);
-      panX = midScreen.x - scale * midWorld.x;
-      panY = midScreen.y - scale * midWorld.y;
-      applyTransform();
-    }
-    updateHelpHint();
-  });
-
-  // --- Init once image is ready ---
-  function initAfterImage() {
-    imgW = mapImg.naturalWidth;
-    imgH = mapImg.naturalHeight;
-
-    // Stage & markers base size (world units)
-    stage.style.width = `${imgW}px`;
-    stage.style.height = `${imgH}px`;
-    markers.style.width = `${imgW}px`;
-    markers.style.height = `${imgH}px`;
-
-    computeFitAndCenter();
-    setZoomButtonActive('fit');
-
-    // Pointer events
-    viewport.addEventListener('pointerdown', onPointerDown, { passive: false });
-    viewport.addEventListener('pointermove', onPointerMove, { passive: false });
-    viewport.addEventListener('pointerup', onPointerUp, { passive: false });
-    viewport.addEventListener('pointercancel', onPointerUp, { passive: false });
-    viewport.addEventListener('lostpointercapture', onPointerUp, { passive: false });
-
-    // Prevent context menu on long-press/right-click (helps mobile drawing)
-    viewport.addEventListener('contextmenu', (e) => e.preventDefault());
-
-    updateHelpHint();
-  }
-
-  if (mapImg.complete) {
-    initAfterImage();
-  } else {
-    mapImg.addEventListener('load', initAfterImage, { once: true });
-    mapImg.addEventListener('error', () => {
-      console.error('Failed to load the map image.');
-    }, { once: true });
-  }
 })();

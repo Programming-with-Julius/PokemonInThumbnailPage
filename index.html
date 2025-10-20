@@ -2,93 +2,72 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Kanto Map - Programming with Julius</title>
+  <title>Kanto Map (Leaflet) - Programming with Julius</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
 
-  <!-- Bootstrap Icons (CDN) -->
+  <!-- Leaflet -->
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin=""
+  />
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+    crossorigin=""
+    defer
+  ></script>
+
+  <!-- Icons (optional) -->
   <link
     rel="stylesheet"
     href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css"
   />
 
   <link rel="stylesheet" href="styles.css" />
+  <script src="script.js" defer></script>
 </head>
 <body>
   <!-- Top credit bar -->
   <header id="topBar" class="bar top">
     <nav class="credits">
-      <a
-        class="credit-link"
-        href="https://blog.vjeux.com/2023/project/pokemon-red-blue-map.html"
-        target="_blank"
-        rel="noopener"
-        title="Open map source in a new tab"
-      >
-        <i class="bi bi-box-arrow-up-right" aria-hidden="true"></i>
-        <span>Map Source</span>
+      <a class="credit-link" href="https://blog.vjeux.com/2023/project/pokemon-red-blue-map.html" target="_blank" rel="noopener">
+        <i class="bi bi-box-arrow-up-right" aria-hidden="true"></i><span>Map Source</span>
       </a>
-
-      <a
-        class="credit-link"
-        href="https://www.youtube.com/watch?v=bryeT4MtzDg"
-        target="_blank"
-        rel="noopener"
-        title="Watch: Play Pokémon Red in a Thumbnail"
-      >
-        <i class="bi bi-youtube" aria-hidden="true"></i>
-        <span>Play Pokémon Red in a Thumbnail</span>
+      <a class="credit-link channel" href="https://www.youtube.com/watch?v=bryeT4MtzDg" target="_blank" rel="noopener">
+        <i class="bi bi-collection-play" aria-hidden="true"></i><span>Play Pokémon Red in a Thumbnail!</span>
       </a>
-
-      <a
-		  class="credit-link channel"
-		  href="https://www.youtube.com/@ProgrammingWithJulius"
-		  target="_blank"
-		  rel="noopener"
-		  title="Programming with Julius on YouTube"
-		>
-		  <i class="bi bi-collection-play" aria-hidden="true"></i>
-		  <span>Programming with Julius</span>
-
-		</a>
-
-		<span id="helpHint" class="hint" aria-live="polite"></span>
+      <a class="credit-link channel" href="https://www.youtube.com/@ProgrammingWithJulius" target="_blank" rel="noopener">
+        <i class="bi bi-youtube" aria-hidden="true"></i><span>Programming with Julius</span>
+      </a>
+      <span id="helpHint" class="hint" aria-live="polite"></span>
     </nav>
   </header>
 
   <!-- Right zoom bar -->
   <aside id="rightBar" class="bar right" aria-label="Zoom controls">
     <button class="zoom-btn" data-zoom="fit" title="Fit to screen">Fit</button>
-    <button class="zoom-btn" data-zoom="1" title="100%">100%</button>
-    <button class="zoom-btn" data-zoom="3" title="300%">300%</button>
-    <button class="zoom-btn" data-zoom="5" title="500%">500%</button>
+    <button class="zoom-btn" data-zoom="2" title="Zoom 2">Z2</button>
+    <button class="zoom-btn" data-zoom="4" title="Zoom 4">Z4</button>
+    <button class="zoom-btn" data-zoom="5" title="Zoom 5">Z5</button>
   </aside>
 
   <!-- Bottom output bar -->
   <footer id="bottomBar" class="bar bottom">
     <div class="cmd-wrap">
-      <textarea id="cmdOutput" readonly
-        aria-label="Movement commands (readonly)"></textarea>
+      <textarea id="cmdOutput" readonly aria-label="Movement commands (readonly)"></textarea>
       <button id="copyBtn" class="copy-btn" title="Copy commands">
-        <i class="bi bi-clipboard" aria-hidden="true"></i>
-        <span class="sr-only">Copy</span>
+        <i class="bi bi-clipboard" aria-hidden="true"></i><span class="sr-only">Copy</span>
       </button>
     </div>
   </footer>
 
-  <!-- Main viewport -->
+  <!-- Map viewport -->
   <main id="viewport" aria-label="Kanto map viewport">
-    <div id="stage">
-      <img
-        id="map"
-        src="kanto.png"
-        alt="Kanto map (Gen 1, Pokémon Red/Blue)"
-        draggable="false"
-      />
-      <!-- Tile markers go here -->
-      <div id="markers" aria-hidden="true"></div>
-    </div>
+    <div id="map"></div>
+    <!-- SVG overlay for tile markers -->
+    <svg id="overlay" aria-hidden="true"></svg>
   </main>
-
-  <script src="script.js" defer></script>
 </body>
 </html>

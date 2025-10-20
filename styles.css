@@ -1,10 +1,9 @@
 :root{
-  --bar-bg: rgba(18, 18, 20, 0.86);
+  --bar-bg: rgba(18,18,20,.86);
   --bar-fg: #fff;
   --accent: #ffd54a;
-  --tile-outline: rgba(255, 64, 64, 0.95);
-  --tile-fill: rgba(255, 64, 64, 0.18);
-  --gap: 10px;
+  --tile-outline: rgba(255,64,64,.95);
+  --tile-fill: rgba(255,64,64,.18);
   --btn-bg: #2a2a32;
   --btn-bg-active: #3e3e49;
   --btn-fg: #f4f4f7;
@@ -20,22 +19,8 @@ body {
   margin: 0;
   color: var(--bar-fg);
   background: #0d0d10;
-  font: 15px/1.4 system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji";
+  font: 15px/1.4 system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, "Helvetica Neue", Arial;
 }
-
-.hint {
-  margin-left: auto;        /* pushes it to the right */
-  opacity: .85;
-  font-size: 12px;
-  white-space: nowrap;
-}
-@media (max-width: 540px) {
-  .hint {
-    white-space: normal;    /* allow wrapping on tiny screens */
-    font-size: 11px;
-  }
-}
-
 
 /* Bars */
 .bar {
@@ -43,11 +28,10 @@ body {
   left: 0; right: 0;
   padding: 8px 12px;
   background: var(--bar-bg);
-  backdrop-filter: blur(6px);
-  z-index: 40;
+  z-index: 1000;
+  color: var(--bar-fg);
   box-shadow: var(--shadow);
 }
-
 .bar.top { top: 0; }
 .bar.bottom { bottom: 0; }
 .bar.right {
@@ -63,7 +47,7 @@ body {
   gap: 8px;
   background: var(--bar-bg);
   border-radius: 12px;
-  z-index: 50;
+  z-index: 1001;
 }
 
 .credits {
@@ -72,128 +56,73 @@ body {
   align-items: center;
   flex-wrap: wrap;
 }
-
 .credit-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--bar-fg);
-  text-decoration: none;
-  padding: 6px 10px;
-  border-radius: 8px;
-  border: 1px solid transparent;
+  display: inline-flex; align-items: center; gap: 6px;
+  color: var(--bar-fg); text-decoration: none;
+  padding: 6px 10px; border-radius: 8px; border: 1px solid transparent;
 }
-.credit-link:hover {
-  background: rgba(255,255,255,.06);
-  border-color: rgba(255,255,255,.12);
-}
-.channel { opacity: .8; }
+.credit-link:hover { background: rgba(255,255,255,.06); border-color: rgba(255,255,255,.12); }
+.channel { opacity: .85; }
+
+.hint { margin-left: auto; opacity: .85; font-size: 12px; white-space: nowrap; }
 
 .zoom-btn {
-  appearance: none;
-  cursor: pointer;
-  background: var(--btn-bg);
-  color: var(--btn-fg);
-  border: var(--btn-border);
-  border-radius: var(--btn-radius);
-  padding: 8px 10px;
-  min-width: 72px;
-  font-weight: 600;
+  appearance: none; cursor: pointer;
+  background: var(--btn-bg); color: var(--btn-fg);
+  border: var(--btn-border); border-radius: var(--btn-radius);
+  padding: 8px 10px; min-width: 72px; font-weight: 600;
 }
 .zoom-btn.active { background: var(--btn-bg-active); }
 
 #bottomBar .cmd-wrap {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 8px;
-  align-items: center;
+  display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center;
 }
 #cmdOutput {
-  width: 100%;
-  min-height: 64px;
-  max-height: 40vh;
-  resize: vertical;
-  background: #121219;
-  color: #dfe3ff;
-  border: 1px solid rgba(255,255,255,.12);
-  border-radius: 10px;
-  padding: 10px 12px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  width: 100%; min-height: 64px; max-height: 40vh; resize: vertical;
+  background: #121219; color: #dfe3ff;
+  border: 1px solid rgba(255,255,255,.12); border-radius: 10px;
+  padding: 10px 12px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
   line-height: 1.3;
 }
 .copy-btn {
-  appearance: none;
-  cursor: pointer;
-  background: var(--btn-bg);
-  color: var(--btn-fg);
-  border: var(--btn-border);
-  border-radius: 10px;
-  padding: 10px 12px;
-  height: 100%;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+  appearance: none; cursor: pointer;
+  background: var(--btn-bg); color: var(--btn-fg);
+  border: var(--btn-border); border-radius: 10px; padding: 10px 12px; height: 100%;
+  display: inline-flex; align-items: center; justify-content: center;
 }
 
-/* Viewport & stage */
-#viewport {
-  position: fixed;
+/* Viewport & map */
+#viewport { position: fixed; inset: 0; overflow: hidden; }
+#map { position: absolute; inset: 0; }
+
+/* SVG overlay sits above map tiles, below UI bars */
+#overlay {
+  position: absolute;
   inset: 0;
-  overflow: hidden;
-  touch-action: none; /* we handle gestures; allows 1-finger draw, 2-finger pan/zoom */
-  user-select: none;
-  z-index: 1;
-}
-
-#stage {
-  position: absolute;
-  transform-origin: 0 0;
-  will-change: transform;
-}
-
-/* Pixel-perfect image rendering */
-#map {
-  position: absolute;
-  top: 0; left: 0;
-  -ms-interpolation-mode: nearest-neighbor;
-  image-rendering: optimizeSpeed;              /* Older FF */
-  image-rendering: -moz-crisp-edges;           /* FF */
-  image-rendering: -o-crisp-edges;             /* Opera */
-  image-rendering: -webkit-optimize-contrast;  /* Safari */
-  image-rendering: pixelated;                  /* Chrome/Edge */
-  image-rendering: crisp-edges;                /* Alt */
-  pointer-events: none; /* let the viewport get the events */
-}
-
-/* Marker layer matches natural image size; scaled with the stage */
-#markers {
-  position: absolute;
-  top: 0; left: 0;
   pointer-events: none;
+  z-index: 500; /* below bars, above Leaflet tiles */
 }
 
-/* Tile markers */
+/* Marker rectangles */
 .tile {
-  position: absolute;
-  width: 16px;
-  height: 16px;
-  outline: 2px solid var(--tile-outline);
-  background: var(--tile-fill);
-  box-shadow: 0 0 0 1px rgba(0,0,0,.25) inset;
+  fill: var(--tile-fill);
+  stroke: var(--tile-outline);
+  stroke-width: 2;
 }
-.tile.first { outline-color: #4cff8f; background: rgba(76,255,143,.18); }
-
-/* Screen-reader only helper */
-.sr-only {
-  position: absolute !important;
-  width: 1px; height: 1px;
-  padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0);
-  white-space: nowrap; border: 0;
+.tile.first {
+  fill: rgba(76,255,143,.18);
+  stroke: rgba(76,255,143,.95);
 }
 
-/* Small screens tweaks */
+/* Small screens */
 @media (max-width: 540px) {
-  .credit-link span { display: none; } /* icons only to save space */
+  .credit-link span { display: none; }
   .credit-link i { font-size: 1.2rem; }
   .zoom-btn { min-width: 64px; }
+  .hint { white-space: normal; font-size: 11px; }
+}
+
+/* Performance: avoid costly backdrop blur on mobile */
+@media (hover: hover) and (pointer: fine) {
+  .bar { backdrop-filter: blur(6px); }
 }
