@@ -1,4 +1,4 @@
-# Pokémon in a Thumbnail — Kanto Route Planner
+# Pokémon in a Thumbnail: Kanto Route Planner
 
 An interactive Pokémon Red map for turning a drawn route into movement commands. Pan around Kanto, trace a path across the tile grid, and copy the resulting `up`, `down`, `left`, and `right` sequence.
 
@@ -61,4 +61,4 @@ Open [localhost:8000](http://localhost:8000). An internet connection is needed t
 
 ## Credits
 
-The application credits **[vjeux's Pokémon Red/Blue map](https://blog.vjeux.com/2023/project/pokemon-red-blue-map.html)** as its map source. Map rendering uses **[Leaflet](https://leafletjs.com/)**, and the controls use **[Bootstrap Icons](https://icons.getbootstrap.com/)**.
+We use **[vjeux's Pokémon Red/Blue map](https://blog.vjeux.com/2023/project/pokemon-red-blue-map.html)** as our map source. Map rendering uses **[Leaflet](https://leafletjs.com/)**, and the controls use **[Bootstrap Icons](https://icons.getbootstrap.com/)**.
